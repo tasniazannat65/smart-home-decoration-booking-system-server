@@ -25,6 +25,25 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
+        const db = client.db('laxius_decor');
+        const userCollections = db.collection('users');
+
+        // user related API's
+        app.post('/users', async(req, res)=>{
+            const user = req.body;
+            user.role = 'user';
+            user.createdAt = new Date();
+            const email = user.email;
+         const userExists = await userCollections.findOne({email});
+          if(userExists){
+        return res.send({message: 'user already exists'})
+      }
+      const result = await userCollections.insertOne(user);
+      res.send(result);
+
+
+        })
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
