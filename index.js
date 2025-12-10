@@ -91,6 +91,18 @@ async function run() {
       }
    
     })
+    app.get('/latest-services', async(req, res)=>{
+      try {
+        const query = {};
+        const result = await serviceCollections.find(query).limit(6).toArray();
+        res.send(result);
+        
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({message: 'Server error'})
+        
+      }
+    })
 
 
     // Send a ping to confirm a successful connection
