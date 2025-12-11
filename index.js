@@ -10,7 +10,7 @@ admin.initializeApp({
 });
 
 const app = express();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const port = process.env.PORT || 3000;
 // middleware
@@ -27,6 +27,27 @@ const client = new MongoClient(uri, {
 app.get("/", (req, res) => {
   res.send("Welcome to Laxius Decor");
 });
+const verifyJWTToken = async(req, res, next)=>{
+  const token = req.headers.authorization;
+  if(!token){
+    return res.status(401).send({message: 'Unauthorized access'})
+  }
+  try{
+    const idToken = token.split(' ')[1];
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    req.decoded_email = decoded.email;
+    next();
+
+
+  }
+  catch(err){
+      return res.status(401).send({message: 'Unauthorized access'})
+
+
+  }
+
+  
+}
 
 async function run() {
   try {
@@ -35,6 +56,34 @@ async function run() {
         const db = client.db('laxius_decor');
         const userCollections = db.collection('users');
         const serviceCollections = db.collection('services');
+        const bookingCollections = db.collection('bookings');
+
+        // role middleware
+    //      const verifyAdmin = async(req, res, next)=>{
+    //   const email = req.decoded_email;
+    //   const query = {email};
+    //   const user = await userCollections.findOne(query);
+    //   if(!user || user.role !== 'admin'){
+    //     res.status(403).send({message: 'forbidden access'})
+    //   }
+
+
+    //   next();
+
+    // }
+    // const verifyDecorator = async(req, res, next)=>{
+    //   const email = req.decoded_email;
+    //   const query = {email};
+    //   const user = await userCollections.findOne(query);
+    //   if(!user || user.role !== 'decorator'){
+    //     res.status(403).send({message: 'forbidden access'})
+    //   }
+
+
+    //   next();
+
+    // }
+
 
         // user related API's
         app.post('/users', async(req, res)=>{
@@ -102,6 +151,40 @@ async function run() {
         res.status(500).send({message: 'Server error'})
         
       }
+    })
+
+    app.get('/services/:id', async(req, res)=>{
+      try {
+         const id = req.params.id;
+      const query = {_id: new ObjectId(id)};
+      const result = await serviceCollections.findOne(query);
+      res.send(result);
+        
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({message: 'Server error'})
+
+        
+      }
+     
+    })
+
+    // bookings related API's
+
+    app.post('/bookings', verifyJWTToken, async(req, res)=>{
+      try {
+        const bookingInfo = req.body;
+        const result = await bookingCollections.insertOne(bookingInfo);
+        res.send(result);
+        
+      } catch (error) {
+         console.log(error)
+        res.status(500).send({message: 'Booking failed'})
+
+        
+      }
+      
+
     })
 
 
