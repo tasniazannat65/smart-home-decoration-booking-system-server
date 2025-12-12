@@ -325,6 +325,20 @@ async function run() {
       return res.send({success: false, message: 'Payment not completed'})
     })
 
+    app.get('/payments', verifyJWTToken, async(req, res)=>{
+      const email = req.query.email;
+      const query = {};
+      if(email){
+        query.customerEmail = email;
+        if(email !== req.decoded_email){
+          return res.status(403).send({message: 'Forbidden Access'})
+        }
+      }
+      const result = await paymentCollections.find(query).sort({paidAt: -1}).toArray();
+
+       res.send(result);
+    })
+
     
 
     // Send a ping to confirm a successful connection
