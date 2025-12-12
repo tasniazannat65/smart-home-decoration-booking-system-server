@@ -190,10 +190,10 @@ async function run() {
 
     })
 
-    app.get('/bookings', async(req, res)=>{
+    app.get('/bookings',verifyJWTToken, async(req, res)=>{
       try {
         const email = req.query.email;
-        const result = await bookingCollections.find({userEmail: email}).sort({bookingDate: -1}).toArray();
+        const result = await bookingCollections.find({userEmail: email}).sort({createdAt: -1}).toArray();
         res.send(result);
         
       } catch (error) {
@@ -201,6 +201,22 @@ async function run() {
         res.status(500).send({message: 'Server error'})
         
       }
+    })
+
+    app.delete('/bookings/:id', verifyJWTToken, async(req, res)=>{
+      try {
+        const id = req.params.id;
+        const query = {_id: new ObjectId(id)};
+        const result = await bookingCollections.deleteOne(query);
+        res.send(result);
+        
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({message: 'Server error'})
+
+        
+      }
+
     })
 
     // payment related API's
@@ -215,7 +231,7 @@ async function run() {
           currency: 'USD',
           unit_amount: amount,
           product_data: {
-            images: [paymentInfo.image],
+            
             name: `Please pay for: ${paymentInfo.serviceName}`
 
           }
