@@ -203,6 +203,29 @@ async function run() {
       }
     })
 
+    app.patch('/bookings/:id', verifyJWTToken, async(req, res)=>{
+      try {
+        const id = req.params.id;
+        const {location, date} = req.body;
+        const result = await bookingCollections.updateOne(
+          {_id: new ObjectId(id)},
+          {
+            $set: {
+              location,
+              bookingDate: new Date(date),
+              updatedAt: new Date()
+            }
+          }
+        )
+        res.send(result);
+        
+      } catch (error) {
+         console.log(error)
+        res.status(500).send({message: 'Server error'})
+        
+      }
+    })
+
     app.delete('/bookings/:id', verifyJWTToken, async(req, res)=>{
       try {
         const id = req.params.id;
