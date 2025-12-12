@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 require('dotenv').config();
 const  admin = require("firebase-admin");
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
 
 const  serviceAccount = require("./laxius_decor_firebase_adminsdk_key.json");
 
@@ -57,6 +59,7 @@ async function run() {
         const userCollections = db.collection('users');
         const serviceCollections = db.collection('services');
         const bookingCollections = db.collection('bookings');
+        const paymentCollections = db.collection('payments');
 
         // role middleware
     //      const verifyAdmin = async(req, res, next)=>{
@@ -187,6 +190,103 @@ async function run() {
 
     })
 
+    app.get('/bookings', async(req, res)=>{
+      try {
+        const email = req.query.email;
+        const result = await bookingCollections.find({userEmail: email}).sort({bookingDate: -1}).toArray();
+        res.send(result);
+        
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({message: 'Server error'})
+        
+      }
+    })
+
+    // payment related API's
+     app.post('/payment-checkout-session', async(req, res)=>{
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100;
+      const session = await stripe.checkout.sessions.create({
+    line_items: [
+      {
+        
+        price_data: {
+          currency: 'USD',
+          unit_amount: amount,
+          product_data: {
+            images: [paymentInfo.image],
+            name: `Please pay for: ${paymentInfo.serviceName}`
+
+          }
+        },
+        quantity: 1,
+      },
+    ],
+    mode: 'payment',
+    metadata: {
+      bookingId: paymentInfo.bookingId,
+      serviceName: paymentInfo.serviceName
+    },
+    customer_email: paymentInfo.userEmail,
+    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancel`,
+  });
+  res.send({url: session.url})
+    })
+
+     app.patch('/payment-success', async(req, res)=>{
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+     const transactionId = session.payment_intent;
+     const paymentExist = await paymentCollections.findOne({transactionId});
+     if(paymentExist){
+      return res.send({message: 'Payment already recorded', transactionId
+      })
+     }
+
+
+
+      if(session.payment_status === 'paid'){
+        const bookingId = session.metadata.bookingId;
+       const updateBooking = await bookingCollections.updateOne(
+        {_id: new ObjectId(bookingId)},
+        {
+          $set: {
+            paymentStatus: 'paid',
+            paidAt: new Date()
+          }
+        }
+       )
+
+        const paymentInfo = {
+          amount: session.amount_total/100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          bookingId: bookingId,
+          serviceName: session.metadata.serviceName,
+          transactionId: transactionId,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+          
+        }
+       
+            const resultPayment = await paymentCollections.insertOne(paymentInfo);
+
+            return res.send({success: true,
+               updateBooking: updateBooking,
+                         transactionId: transactionId,
+
+               
+                payment: resultPayment})
+        
+        
+      }
+      return res.send({success: false, message: 'Payment not completed'})
+    })
+
+    
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
