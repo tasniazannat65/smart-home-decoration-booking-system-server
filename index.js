@@ -62,18 +62,18 @@ async function run() {
         const paymentCollections = db.collection('payments');
 
         // role middleware
-    //      const verifyAdmin = async(req, res, next)=>{
-    //   const email = req.decoded_email;
-    //   const query = {email};
-    //   const user = await userCollections.findOne(query);
-    //   if(!user || user.role !== 'admin'){
-    //     res.status(403).send({message: 'forbidden access'})
-    //   }
+         const verifyAdmin = async(req, res, next)=>{
+      const email = req.decoded_email;
+      const query = {email};
+      const user = await userCollections.findOne(query);
+      if(!user || user.role !== 'admin'){
+        res.status(403).send({message: 'forbidden access'})
+      }
 
 
-    //   next();
+      next();
 
-    // }
+    }
     // const verifyDecorator = async(req, res, next)=>{
     //   const email = req.decoded_email;
     //   const query = {email};
@@ -92,6 +92,7 @@ async function run() {
         app.post('/users', async(req, res)=>{
             const user = req.body;
             user.role = 'user';
+            user.status = null;
             user.createdAt = new Date();
             const email = user.email;
          const userExists = await userCollections.findOne({email});
@@ -109,6 +110,108 @@ async function run() {
       const query = {email};
       const user = await userCollections.findOne(query);
       res.send({role: user?.role || 'user'})
+    })
+
+    app.get('/users', verifyJWTToken, verifyAdmin, async(req, res)=>{
+     try {
+       
+      const result = await userCollections.find({role: {$ne: 'admin'}}).toArray();
+      res.send(result);
+      
+     } catch (error) {
+      res.status(500).send({message: 'Failed to fetch users'})
+      
+     }
+    })
+
+    app.put('/users/:id/make-decorator', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+        const result = await userCollections.updateOne(
+          {_id: id},
+          {
+            $set: {
+              role: 'decorator',
+               status: 'pending'
+            }
+          }
+        )
+        res.send(result);
+        
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to make a user to a decorator'})
+        
+      }
+    })
+    app.put('/users/:id/approve',verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+        const result = await userCollections.updateOne(
+          {_id: id},
+          {
+            $set: {
+               status: 'approved'
+            }
+          }
+        )
+        res.send(result);
+        
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to approve decorator'})
+        
+      }
+    })
+    app.put('/users/:id/disable', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+        const result = await userCollections.updateOne(
+          {_id: id},
+          {
+            $set: {
+               status: 'disabled'
+            }
+          }
+        )
+        res.send(result);
+        
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to disable decorator'})
+        
+      }
+    })
+    app.put('/users/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+        const update = {$set: req.body};
+        const result = await userCollections.updateOne(
+          {_id: id}, update
+         
+        )
+        res.send(result);
+        
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to update user'})
+        
+      }
+    })
+    app.delete('/users/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+        const result = await userCollections.deleteOne(
+          {_id: id}
+         
+        )
+        res.send(result);
+        
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to delete user'})
+        
+      }
     })
   
     // services related API's
