@@ -58,6 +58,7 @@ async function run() {
         const db = client.db('laxius_decor');
         const userCollections = db.collection('users');
         const serviceCollections = db.collection('services');
+        const packageCollections = db.collection('packages');
         const bookingCollections = db.collection('bookings');
         const paymentCollections = db.collection('payments');
 
@@ -74,18 +75,20 @@ async function run() {
       next();
 
     }
-    // const verifyDecorator = async(req, res, next)=>{
-    //   const email = req.decoded_email;
-    //   const query = {email};
-    //   const user = await userCollections.findOne(query);
-    //   if(!user || user.role !== 'decorator'){
-    //     res.status(403).send({message: 'forbidden access'})
-    //   }
+    const verifyDecorator = async(req, res, next)=>{
+     const email = req.decoded_email;
+     const decorator = await userCollections.findOne({
+      email,
+      role: 'decorator',
+      status: 'approved'
+     });
+     if(!decorator){
+      return res.status(403).send({message: 'forbidden access'})
+     }
+      req.decorator = decorator;
+      next();
 
-
-    //   next();
-
-    // }
+    }
 
 
         // user related API's
@@ -113,10 +116,27 @@ async function run() {
     })
 
     app.get('/users', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      
      try {
-       
-      const result = await userCollections.find({role: {$ne: 'admin'}}).toArray();
-      res.send(result);
+                 const search = req.query.search || "";
+
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+      const query = {role: {$ne: 'admin'}}
+      if(search){
+        query.displayName = {$regex: search, $options: 'i'};
+      }
+      
+       const total = await userCollections.countDocuments(query);
+      const users = await userCollections.find(query).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
+      return res.send({
+        users,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+
+      });
       
      } catch (error) {
       res.status(500).send({message: 'Failed to fetch users'})
@@ -124,15 +144,66 @@ async function run() {
      }
     })
 
+
+    app.get('/users/top-decorators', async(req, res)=>{
+      try {
+        const decorators = await userCollections.find({
+          role: 'decorator',
+          status: 'approved'
+        }).sort({rating: -1, totalJobs: -1}).limit(6).project(
+          {displayName: 1,
+            photoURL: 1,
+            specialties: 1,
+            rating: 1
+          }).toArray();
+          res.send(decorators);
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to load top decorators'})
+        
+      }
+    })
+    app.patch('/users/fill-specialties', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+       const result = await userCollections.updateMany(
+        {
+          role: 'decorator',
+          status: 'approved',
+          $or: [
+            {specialties: {$exists: false}},
+            {specialties: {$size: 0}}
+          ]
+
+        },
+        {
+          $set: {specialties: ['Wedding', 'Home Decor']}
+        }
+
+       )
+       res.send({
+        success: true,
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        message: 'Empty specialties updated with default values'
+       })
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to update specialties'})
+        
+      }
+    })
+
     app.put('/users/:id/make-decorator', verifyJWTToken, verifyAdmin, async(req, res)=>{
       try {
         const id = new ObjectId(req.params.id);
         const result = await userCollections.updateOne(
-          {_id: id},
+          {_id: id, role: 'user'},
           {
             $set: {
               role: 'decorator',
-               status: 'pending'
+               status: 'pending',
+               specialties: ['Wedding', 'Home Decor'],
+               totalJobs: 0
             }
           }
         )
@@ -148,7 +219,7 @@ async function run() {
       try {
         const id = new ObjectId(req.params.id);
         const result = await userCollections.updateOne(
-          {_id: id},
+          {_id: id, role: 'decorator'},
           {
             $set: {
                status: 'approved'
@@ -198,6 +269,7 @@ async function run() {
         
       }
     })
+    
     app.delete('/users/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
       try {
         const id = new ObjectId(req.params.id);
@@ -219,15 +291,17 @@ async function run() {
       try {
            const search = req.query.search || "";
       const category = req.query.category || "";
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const isAdmin = req.query.admin === 'true';
+      const skip = (page - 1) * limit;
       let min =   parseInt(req.query.min);
       let max =   parseInt(req.query.max);
-      if(isNaN(min)){
-        return min = 0;
-      }
-      if(isNaN(max)){
-        return max = 9999999;
-      }
-      let query = {
+      if(isNaN(min)) min = 0;
+      
+      if(isNaN(max)) max = 9999999;
+      
+      const  query = {
         cost: {$gte: min, $lte: max}
       };
       if(search){
@@ -236,24 +310,40 @@ async function run() {
       if(category){
         query.service_category = category;
       }
-      const result = await serviceCollections.find(query).toArray();
-      res.send(result);
+      if(isAdmin){
+      const total = await serviceCollections.countDocuments(query);
+       const services = await serviceCollections.find(query).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
+      return res.send({
+        services,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+      });
+
+
+      }
+     const services = await serviceCollections.find(query).sort({createdAt: -1}).toArray();
+     res.send(services);
         
       } catch (error) {
-        console.log(error);
         res.status(500).send({message: 'Server error'});
         
       }
    
     })
+
+    app.get('/services/all', async(req, res)=>{
+      const services = await serviceCollections.find().toArray();
+      res.send({services});
+    })
+
     app.get('/latest-services', async(req, res)=>{
       try {
         const query = {};
-        const result = await serviceCollections.find(query).limit(6).toArray();
+        const result = await serviceCollections.find(query).sort({createdAt: -1}).limit(6).toArray();
         res.send(result);
         
       } catch (error) {
-        console.log(error)
         res.status(500).send({message: 'Server error'})
         
       }
@@ -267,7 +357,6 @@ async function run() {
       res.send(result);
         
       } catch (error) {
-        console.log(error)
         res.status(500).send({message: 'Server error'})
 
         
@@ -275,16 +364,165 @@ async function run() {
      
     })
 
+    app.post('/services', verifyJWTToken, verifyAdmin, async (req, res)=> {
+     try {
+       const service = {
+        service_name: req.body.service_name,
+        image: req.body.image,
+        cost: req.body.cost,
+        unit: req.body.unit,
+        service_category: req.body.service_category,
+        description: req.body.description,
+        createdByEmail: req.decoded_email,
+        createdAt: new Date(),
+      }
+      const result = await serviceCollections.insertOne(service);
+      res.send(result);
+      
+     } catch (error) {
+        res.status(500).send({message: 'Server error'})
+     }
+    })
+    app.patch('/services/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
+     try {
+       const id = req.params.id;
+   const {service_name, service_category, cost, unit, image, description} = req.body;
+       
+      const result = await serviceCollections.updateOne(
+       {_id: new ObjectId(id)},
+       {$set: {
+       service_name,
+      service_category,
+      cost,
+      unit,
+      image,
+      description,
+      updatedAt: new Date()
+       }}
+      )
+    
+
+      res.send(result);
+      
+     } catch (error) {
+        res.status(500).send({message: 'Server error'})
+
+      
+     }
+    })
+
+    app.delete('/services/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const id = new ObjectId(req.params.id);
+      const result = await serviceCollections.deleteOne({_id: id});
+      res.send(result);
+        
+      } catch (error) {
+        res.status(500).send({message: 'Server error'})
+        
+      }
+    })
+
+    // packages related API's
+     app.get('/packages', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+           const search = req.query.search || "";
+      const category = req.query.category || "";
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+      
+      
+      const  query = {};
+
+      if(search){
+        query.package_name = {$regex: search, $options: 'i'};
+      }
+      if(category){
+        query.category = category;
+      }
+      const total = await packageCollections.countDocuments(query);
+      const packages = await packageCollections.find(query).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
+      res.send({
+        packages,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+      });
+        
+      } catch (error) {
+        res.status(500).send({message: 'Server error'});
+        
+      }
+   
+    })
+
+    app.post('/packages', verifyJWTToken, verifyAdmin, async (req, res)=> {
+     try {
+      const packageData = {
+        ...req.body,
+        createdAt: new Date()
+      }
+      const result = await packageCollections.insertOne(packageData);
+      res.send(result);
+      
+     } catch (error) {
+        res.status(500).send({message: 'Server error'})
+     }
+    })
+
+     app.patch('/packages/:id', verifyJWTToken, verifyAdmin, async(req, res)=>{
+     try {
+       const id = req.params.id;
+const updateDoc = {
+ $set: {
+   ...req.body,
+  updatedAt: new Date()
+ }
+}       
+      const result = await packageCollections.updateOne(
+       {_id: new ObjectId(id)},
+       updateDoc
+      )
+    
+
+      res.send(result);
+      
+     } catch (error) {
+        res.status(500).send({message: 'Server error'})
+
+      
+     }
+    })
+
+    app.delete('/packages/:id', verifyJWTToken, verifyAdmin, async(req, res)=> {
+      const result = await packageCollections.deleteOne({
+        _id: new ObjectId(req.params.id)
+      });
+      res.send(result);
+    })
+
+
+
+
+
+
+
+
     // bookings related API's
 
     app.post('/bookings', verifyJWTToken, async(req, res)=>{
       try {
-        const bookingInfo = req.body;
+        const bookingInfo = {
+          ...req.body,
+          paymentStatus: 'pending',
+          status: 'pending',
+          createdAt: new Date()
+        };
         const result = await bookingCollections.insertOne(bookingInfo);
         res.send(result);
         
       } catch (error) {
-         console.log(error)
         res.status(500).send({message: 'Booking failed'})
 
         
@@ -300,7 +538,6 @@ async function run() {
         res.send(result);
         
       } catch (error) {
-        console.log(error)
         res.status(500).send({message: 'Server error'})
         
       }
@@ -323,11 +560,361 @@ async function run() {
         res.send(result);
         
       } catch (error) {
-         console.log(error)
         res.status(500).send({message: 'Server error'})
         
       }
     })
+    app.get('/bookings/admin-to-assign', verifyJWTToken, verifyAdmin, async(req, res)=> {
+      try {
+        const bookings = await bookingCollections.find({
+          paymentStatus: 'paid',
+          decoratorId: {$exists: false}
+        }).sort({createdAt: -1}).toArray();
+        res.send(bookings);
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to fetch bookings'})
+        
+      }
+    } )
+    app.get('/bookings/admin', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+              const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+            const skip = (page - 1) * limit;
+             const total = await bookingCollections.countDocuments({});
+
+        const bookings = await bookingCollections.find({}).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
+       return res.send({
+        bookings,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+      });
+        
+      } catch (error) {
+        res.status(500).send({message: 'Failed to load bookings'})
+        
+      }
+    })
+    app.get('/admin/revenue-analytics', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+        const result = await paymentCollections.aggregate([
+          {
+            $addFields: {
+              createdAt: {
+                $ifNull: ['$createdAt', new Date()]
+              }
+            }
+
+          },
+         
+          {
+            $group: {
+              _id: {
+                year: {$year: '$createdAt'},
+                month: {$month: '$createdAt'}
+              },
+              revenue: {$sum: '$price'},
+              totalPayments: {$sum: 1}
+            }
+          },
+          {
+            $project: {
+              _id: 0,
+              month: {
+                $concat: [
+                  {$toString: '$_id.year'},
+                  '_',
+                  {
+                    $cond: [
+                      {$lt: ['$_id.month', 10]},
+                      {$concat: ['0', {$toString: '$_id.month'}]},
+                         {$toString: '$_id.month'}
+
+                    ]
+
+                  }
+                ]
+              },
+              revenue: 1,
+              totalPayments: 1
+            }
+          },
+          {$sort: {month: 1}}
+        ]).toArray();
+        res.send(result);
+        
+      } catch (error) {
+        res.status(500).send({message: 'Revenue analytics failed'})
+        
+      }
+    })
+
+    app.get('/admin/service-demand', verifyJWTToken, verifyAdmin, async(req, res)=> {
+      try {
+        const result = await bookingCollections.aggregate([
+          {
+            $match: {serviceName: {$exists: true, $ne: ''}} 
+          },
+         
+         
+          {
+           $group: {
+            _id: '$serviceName',
+            count: {$sum: 1}
+           }
+          },
+          {
+            $project: {
+              _id: 0,
+              service: '$_id',
+              count: 1
+            }
+          },
+          {$sort: {count: -1}}
+          
+        ]).toArray();
+        res.send(result);
+        
+      } catch (error) {
+        res.status(500).send({message: 'Service demand error'})
+        
+      }
+    })
+
+    app.get('/admin/dashboard-summary', verifyJWTToken, verifyAdmin, async(req, res)=> {
+      try {
+        const totalBookings = await bookingCollections.countDocuments();
+        const paidBookings = await bookingCollections.countDocuments({
+          paymentStatus: 'paid',
+        })
+        const pendingAssignments = await bookingCollections.countDocuments({
+          paymentStatus: 'paid',
+          decoratorId: {$exists: false},
+        });
+        
+        const revenueAgg = await paymentCollections.aggregate([
+          {
+            $group: {
+              _id: null,
+              totalRevenue: {$sum: '$price'},
+            },
+          }
+        ]).toArray();
+        const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
+        const activeDecorators = await userCollections.countDocuments({
+          role: 'decorator',
+          status: 'approved'
+        })
+         const totalServices = await serviceCollections.countDocuments();
+
+        res.send({
+          totalRevenue,
+          totalBookings,
+          paidBookings,
+          pendingAssignments,
+          
+          activeDecorators,
+          totalServices,
+        })
+
+        
+      } catch (error) {
+        res.status(500).send({message: 'Dashboard summary failed'
+        })
+        
+      }
+    })
+
+    app.get('/user/dashboard-summary', verifyJWTToken, async(req, res)=>{
+      const email = req.decoded_email;
+      const totalBookings = await bookingCollections.countDocuments({
+        userEmail: email
+      });
+      const pendingPayment = await bookingCollections.countDocuments({
+        userEmail: email,
+        paymentStatus: {$ne: 'paid'}
+      });
+      const completed = await bookingCollections.countDocuments({
+        userEmail: email,
+        status: 'completed'
+      });
+      const cancelled = await bookingCollections.countDocuments({
+        userEmail: email,
+        status: 'cancelled'
+      });
+      res.send({
+        totalBookings,
+        pendingPayment,
+        completed,
+        cancelled
+      })
+    })
+    app.get('/decorator/dashboard-summary', verifyJWTToken, verifyDecorator, async(req, res)=> {
+      const decoratorId = req.decorator._id;
+      const totalJobs = await bookingCollections.countDocuments({
+        decoratorId,
+        paymentStatus: 'paid',
+      });
+      const today = new Date().toISOString().split("T")[0];
+      const todayJobs = await bookingCollections.countDocuments({
+        decoratorId,
+        bookingDate: today,
+        paymentStatus: 'paid'
+      });
+      const earningsAgg = await paymentCollections.aggregate([
+        {$match: {decoratorId}},
+        {$group: {_id: null, totalEarnings: {$sum: '$price'}}},
+      ]).toArray();
+      res.send({
+        totalJobs,
+        todayJobs,
+        totalEarnings: earningsAgg[0]?.totalEarnings || 0
+      })
+    })
+    app.get('/decorator/assigned-projects', verifyJWTToken, verifyDecorator, async(req, res)=>{
+      const decoratorId = req.decorator._id;
+      const result = await bookingCollections.find({
+        decoratorId,
+        paymentStatus: 'paid'
+      }).sort({createdAt: -1})
+      .toArray();
+      res.send(result);
+    })
+    app.get('/decorator/today-schedule', verifyJWTToken, verifyDecorator, async(req, res)=> {
+      const decoratorId = req.decorator._id;
+
+      const start = new Date();
+      start.setHours(0,0,0,0,);
+      const end = new Date();
+      end.setHours(23,59,59,999);
+      const result = await bookingCollections.find({
+        decoratorId,
+        bookingDate: {$gte: start, $lte: end},
+        paymentStatus: 'paid'
+      }).toArray();
+      res.send(result);
+    })
+    app.get('/decorator/earning-summary', verifyJWTToken, verifyDecorator, async(req, res)=>{
+            const decoratorId = req.decorator._id;
+
+      const result = await paymentCollections.aggregate([
+        {$match: {decoratorId}},
+        {
+          $group: {
+            _id: null,
+            totalEarnings: {$sum: '$price'},
+            totalJobs: {$sum: 1}
+          }
+        }
+      ]).toArray();
+      res.send(result[0] || {totalEarnings: 0, totalJobs: 0});
+    })
+    app.get('/decorator/earning-history', verifyJWTToken, verifyDecorator, async(req, res)=>{
+        const decoratorId = req.decorator._id;
+
+      const result = await paymentCollections.find({
+        decoratorId
+      
+      }).sort({createdAt: -1}).toArray();
+      res.send(result);
+    })
+  
+app.get('/decorator/project/:id', verifyJWTToken, verifyDecorator, async(req, res)=>{
+  try {
+    const bookingId = req.params.id;
+    const decoratorId = req.decorator._id;
+    const booking = await bookingCollections.findOne({
+      _id: new ObjectId(bookingId),
+      decoratorId
+    })
+    if(!booking){
+      return res.status(404).send({message: 'Project not found'})
+    }
+    res.send(booking)
+    
+  } catch (error) {
+    res.status(500).send({message: 'Server error'})
+  }
+}) 
+
+app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, async(req, res)=>{
+  try {
+    const bookingId = new ObjectId(req.params.id);
+    const {status} = req.body;
+    const decoratorId = new ObjectId(req.decorator._id);
+    const allowedStatus = ['assigned',
+      'planning',
+      'materials_ready',
+      'on_the_way',
+      'completed'
+
+    ]
+    if(!allowedStatus.includes(status))return res.status(400).send({message: 'Invalid status'});
+    const result = await bookingCollections.updateOne(
+      {_id: bookingId, decoratorId},
+      {
+        $set: {status, updatedAt: new Date()},
+        $push: {statusHistory: {status, time: new Date()}}
+      }
+    );
+    if(result.matchedCount === 0) return res.status(404).send({message: 'Project not found or unauthorized '})
+      res.send({success: true, message: 'Status updated'})
+
+    
+
+
+  } catch (error) {
+    res.status(500).send({message: 'Server error'})
+    
+  }
+})
+
+    app.patch('/bookings/:id/assign-decorator', verifyJWTToken, verifyAdmin, async(req, res)=>{
+      try {
+       const bookingId = new ObjectId(req.params.id);
+       const {decoratorId} = req.body;
+       const booking = await bookingCollections.findOne({
+        _id: bookingId,
+        paymentStatus: 'paid',
+        decoratorId: {$exists: false}
+       })
+       if(!booking){
+        return res.status(400).send({message: 'Booking not valid for assignment'});
+      
+       }
+        const serviceCategories = booking.services?.map(s=> s.service_category) || [];
+        await bookingCollections.updateOne(
+         {_id: bookingId},
+         {
+          $set: {
+            decoratorId: new ObjectId(decoratorId),
+            status: 'assigned',
+            assignedAt: new Date()
+          }
+         } 
+        )
+        await userCollections.updateOne(
+          {_id: new ObjectId(decoratorId), role: 'decorator'},
+          {
+            $addToSet: {specialties: {$each: serviceCategories}},
+            $inc: {totalJobs: 1}
+          }
+        )
+        await paymentCollections.updateOne(
+          {bookingId},
+          {$set: {
+            decoratorId: new ObjectId(decoratorId)
+          }}
+        )
+        res.send({success: true, message: 'Decorator assigned successfully'})
+      } catch (error) {
+        res.status(500).send({message: 'Failed to assign decorator'})
+        
+      }
+    })
+
 
     app.delete('/bookings/:id', verifyJWTToken, async(req, res)=>{
       try {
@@ -337,7 +924,6 @@ async function run() {
         res.send(result);
         
       } catch (error) {
-        console.log(error)
         res.status(500).send({message: 'Server error'})
 
         
@@ -346,9 +932,9 @@ async function run() {
     })
 
     // payment related API's
-     app.post('/payment-checkout-session', async(req, res)=>{
+     app.post('/payment-checkout-session', verifyJWTToken, async(req, res)=>{
       const paymentInfo = req.body;
-      const amount = parseInt(paymentInfo.cost) * 100;
+      const amount = Math.round(Number(paymentInfo.cost) * 100);
       const session = await stripe.checkout.sessions.create({
     line_items: [
       {
@@ -377,7 +963,7 @@ async function run() {
   res.send({url: session.url})
     })
 
-     app.patch('/payment-success', async(req, res)=>{
+     app.patch('/payment-success', verifyJWTToken, async(req, res)=>{
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -391,33 +977,42 @@ async function run() {
 
 
       if(session.payment_status === 'paid'){
-        const bookingId = session.metadata.bookingId;
-       const updateBooking = await bookingCollections.updateOne(
+        const bookingId = new ObjectId(session.metadata.bookingId);
+        const booking = await bookingCollections.findOne({
+          _id: new ObjectId(bookingId)
+        })
+        if(!booking){
+          return res.status(404).send({message: 'Booking not found'});
+        }
+        await bookingCollections.updateOne(
         {_id: new ObjectId(bookingId)},
         {
           $set: {
             paymentStatus: 'paid',
+            status: 'pending_assignment',
             paidAt: new Date()
           }
         }
        )
 
         const paymentInfo = {
-          amount: session.amount_total/100,
+          price: session.amount_total/100,
           currency: session.currency,
           customerEmail: session.customer_email,
-          bookingId: bookingId,
+          bookingId,
+          decoratorId: booking.decoratorId || null,
           serviceName: session.metadata.serviceName,
+          serviceCategory: booking.serviceCategory || 'general',
           transactionId: transactionId,
           paymentStatus: session.payment_status,
           paidAt: new Date(),
+          createdAt: new Date()
           
         }
        
             const resultPayment = await paymentCollections.insertOne(paymentInfo);
 
             return res.send({success: true,
-               updateBooking: updateBooking,
                          transactionId: transactionId,
 
                
@@ -437,7 +1032,7 @@ async function run() {
           return res.status(403).send({message: 'Forbidden Access'})
         }
       }
-      const result = await paymentCollections.find(query).sort({paidAt: -1}).toArray();
+      const result = await paymentCollections.find(query).sort({paidAt: -1}).limit(7).toArray();
 
        res.send(result);
     })
