@@ -145,6 +145,9 @@ async function run() {
     })
 
 
+
+
+
     app.get('/users/top-decorators', async(req, res)=>{
       try {
         const decorators = await userCollections.find({
@@ -163,35 +166,33 @@ async function run() {
         
       }
     })
-    app.patch('/users/fill-specialties', verifyJWTToken, verifyAdmin, async(req, res)=>{
+
+    app.patch('/decorator/update-specialties', verifyJWTToken, verifyDecorator, async(req, res)=>{
       try {
-       const result = await userCollections.updateMany(
-        {
-          role: 'decorator',
-          status: 'approved',
-          $or: [
-            {specialties: {$exists: false}},
-            {specialties: {$size: 0}}
-          ]
-
-        },
-        {
-          $set: {specialties: ['Wedding', 'Home Decor']}
+        const decoratorId = req.decorator._id;
+        const {specialties} = req.body;
+        if(!Array.isArray(specialties)){
+          return res.status(400).send({message: 'Specialties must be an array'});
         }
+         await userCollections.updateOne(
+          {_id: decoratorId},
+          {
+            $set: {
+              specialties,
+              updatedAt: new Date(),
+              rating: req.decorator.rating ?? 0
+            }
+          }
+         )
 
-       )
-       res.send({
-        success: true,
-        matchedCount: result.matchedCount,
-        modifiedCount: result.modifiedCount,
-        message: 'Empty specialties updated with default values'
-       })
+         res.send({success: true, message: 'Specialties updated'});
         
       } catch (error) {
-        res.status(500).send({message: 'Failed to update specialties'})
+        res.status(500).send({message: 'Failed to update specialties'});
         
       }
     })
+   
 
     app.put('/users/:id/make-decorator', verifyJWTToken, verifyAdmin, async(req, res)=>{
       try {
@@ -203,7 +204,9 @@ async function run() {
               role: 'decorator',
                status: 'pending',
                specialties: ['Wedding', 'Home Decor'],
-               totalJobs: 0
+               totalJobs: 0,
+               rating: 0,
+               createdAt: new Date()
             }
           }
         )
@@ -222,7 +225,8 @@ async function run() {
           {_id: id, role: 'decorator'},
           {
             $set: {
-               status: 'approved'
+               status: 'approved',
+               rating: 0
             }
           }
         )
@@ -515,6 +519,7 @@ const updateDoc = {
       try {
         const bookingInfo = {
           ...req.body,
+          bookingDate: new Date(req.body.bookingDate),
           paymentStatus: 'pending',
           status: 'pending',
           createdAt: new Date()
@@ -753,14 +758,23 @@ const updateDoc = {
     })
     app.get('/decorator/dashboard-summary', verifyJWTToken, verifyDecorator, async(req, res)=> {
       const decoratorId = req.decorator._id;
+      const decorator = await userCollections.findOne(
+        {_id: decoratorId},
+        {projection: {specialties: 1, rating: 1}}
+      )
       const totalJobs = await bookingCollections.countDocuments({
         decoratorId,
         paymentStatus: 'paid',
       });
-      const today = new Date().toISOString().split("T")[0];
+      const today = new Date();
+      const start = new Date(today);
+       start.setHours(0,0,0,0,);
+       const end = new Date(today);
+       end.setHours(23,59,59,999);
+    
       const todayJobs = await bookingCollections.countDocuments({
         decoratorId,
-        bookingDate: today,
+        bookingDate: {$gte: start, $lte: end},
         paymentStatus: 'paid'
       });
       const earningsAgg = await paymentCollections.aggregate([
@@ -770,7 +784,9 @@ const updateDoc = {
       res.send({
         totalJobs,
         todayJobs,
-        totalEarnings: earningsAgg[0]?.totalEarnings || 0
+        totalEarnings: earningsAgg[0]?.totalEarnings || 0,
+        specialties: decorator?.specialties || [],
+        rating: decorator?.rating || 0
       })
     })
     app.get('/decorator/assigned-projects', verifyJWTToken, verifyDecorator, async(req, res)=>{
@@ -784,11 +800,14 @@ const updateDoc = {
     })
     app.get('/decorator/today-schedule', verifyJWTToken, verifyDecorator, async(req, res)=> {
       const decoratorId = req.decorator._id;
+      const today = new Date();
+      const start = new Date(today);
+       start.setHours(0,0,0,0,);
+       const end = new Date(today);
+       end.setHours(23,59,59,999);
 
-      const start = new Date();
-      start.setHours(0,0,0,0,);
-      const end = new Date();
-      end.setHours(23,59,59,999);
+
+      
       const result = await bookingCollections.find({
         decoratorId,
         bookingDate: {$gte: start, $lte: end},
@@ -796,6 +815,9 @@ const updateDoc = {
       }).toArray();
       res.send(result);
     })
+
+
+
     app.get('/decorator/earning-summary', verifyJWTToken, verifyDecorator, async(req, res)=>{
             const decoratorId = req.decorator._id;
 
@@ -884,7 +906,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
         return res.status(400).send({message: 'Booking not valid for assignment'});
       
        }
-        const serviceCategories = booking.services?.map(s=> s.service_category) || [];
+        
         await bookingCollections.updateOne(
          {_id: bookingId},
          {
@@ -898,7 +920,8 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
         await userCollections.updateOne(
           {_id: new ObjectId(decoratorId), role: 'decorator'},
           {
-            $addToSet: {specialties: {$each: serviceCategories}},
+            
+            
             $inc: {totalJobs: 1}
           }
         )
@@ -1032,7 +1055,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
           return res.status(403).send({message: 'Forbidden Access'})
         }
       }
-      const result = await paymentCollections.find(query).sort({paidAt: -1}).limit(7).toArray();
+      const result = await paymentCollections.find(query).sort({paidAt: -1}).toArray();
 
        res.send(result);
     })
