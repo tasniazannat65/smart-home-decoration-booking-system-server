@@ -1,3 +1,4 @@
 node_modules
 .env
 laxius_decor_firebase_adminsdk_key.json
+.vercel

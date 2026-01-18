@@ -5,7 +5,10 @@ const  admin = require("firebase-admin");
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
 
-const  serviceAccount = require("./laxius_decor_firebase_adminsdk_key.json");
+// const  serviceAccount = require("./laxius_decor_firebase_adminsdk_key.json");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -36,7 +39,13 @@ const verifyJWTToken = async(req, res, next)=>{
   }
   try{
     const idToken = token.split(' ')[1];
-    const decoded = await admin.auth().verifyIdToken(idToken)
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const user = await userCollections.findOne({email: decoded.email});
+    if(!user){
+      return res.status(401).send({message: 'User not found'});
+
+    }
+    req.user = user;
     req.decoded_email = decoded.email;
     next();
 
@@ -54,13 +63,14 @@ const verifyJWTToken = async(req, res, next)=>{
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
         const db = client.db('laxius_decor');
         const userCollections = db.collection('users');
         const serviceCollections = db.collection('services');
         const packageCollections = db.collection('packages');
         const bookingCollections = db.collection('bookings');
         const paymentCollections = db.collection('payments');
+        const reviewCollections = db.collection('reviews');
 
         // role middleware
          const verifyAdmin = async(req, res, next)=>{
@@ -344,7 +354,7 @@ async function run() {
     app.get('/latest-services', async(req, res)=>{
       try {
         const query = {};
-        const result = await serviceCollections.find(query).sort({createdAt: -1}).limit(6).toArray();
+        const result = await serviceCollections.find(query).sort({createdAt: -1}).limit(8).toArray();
         res.send(result);
         
       } catch (error) {
@@ -1060,13 +1070,106 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
        res.send(result);
     })
 
+    // reviews related API's
+
+    app.get('/reviews', async(req, res)=> {
+      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
+      res.send(reviews);
+    });
+
+    app.post('/reviews', verifyJWTToken, async(req, res)=> {
+      const {rating, message, serviceId} = req.body;
+      if(!rating || !message || !serviceId) {
+        return res.status(400).send({message: 'All field required'});
+
+      }
+      const completedBooking = await bookingCollections.findOne({
+        userEmail: req.decoded_email,
+        serviceId: new ObjectId(serviceId),
+        paymentStatus: 'paid',
+        status: 'completed'
+      });
+      if(!completedBooking){
+        return res.status(403).send({
+          message: 'You can review only after completing this service'
+        })
+      }
+        const alreadyReviewed = await reviewCollections.findOne({
+        userId: req.user._id,
+        serviceId: new ObjectId(serviceId)
+      })
+      if(alreadyReviewed){
+        return res.status(409).send({message: 'Already reviewed'});
+
+      }
+
+      const review = {
+        userId: req.user._id,
+        userName: req.user.displayName,
+        userPhoto: req.user.photoURL,
+        serviceId: new ObjectId(serviceId),
+        rating: Number(rating),
+        message,
+        createdAt: new Date()
+      }
+    
+      const result = await reviewCollections.insertOne(review);
+      const serviceReviews = await reviewCollections.aggregate([
+        {$match: {serviceId: new ObjectId(serviceId)}},
+        {$group: {_id: null, avgRating: {$avg: '$rating'}}}
+      ]).toArray();
+      const serviceAvgRating = serviceReviews[0]?.avgRating || 0;
+      const service = await serviceCollections.findOne(
+        {_id: new ObjectId(serviceId)}
+      );
+      await serviceCollections.updateOne(
+        {_id: new ObjectId(serviceId)},
+        {$set: {rating: Number(serviceAvgRating.toFixed(1))}}
+      )
+
+      if(service?.createdByEmail){
+        const decorator = await userCollections.findOne({
+          email: service.createdByEmail,
+          role: 'decorator'
+        })
+        if(decorator){
+          const decoratorServices = await serviceCollections.find({createdByEmail: decorator.email}).project({_id: 1}).toArray();
+          const serviceIds = decoratorServices.map(s => s._id);
+          const decoratorRatingAgg = await reviewCollections.aggregate([
+            {$match: {serviceId: {$in: serviceIds}}},
+            {$group: {_id: null, avgRating: {$avg: '$rating'}}}
+          ]).toArray();
+          const decoratorAvgRating = decoratorRatingAgg[0]?.avgRating || 0;
+          await userCollections.updateOne(
+            {_id: decorator._id},
+            {$set: {rating: Number(decoratorAvgRating.toFixed(1))}}
+          )
+
+        }
+      }
+      
+      res.send(result);
+    })
+
+    app.get('/reviews/service/:id', async(req, res)=> {
+      const serviceId = req.params.id;
+      const reviews = await reviewCollections.find({serviceId: new ObjectId(serviceId)}).sort({createdAt: -1}).toArray();
+      res.send(reviews);
+    })
+
+    app.get('/reviews', async(req, res)=> {
+      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
+      res.send(reviews);
+
+    })
+
     
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
