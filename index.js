@@ -32,7 +32,21 @@ const client = new MongoClient(uri, {
 app.get("/", (req, res) => {
   res.send("Welcome to Laxius Decor");
 });
-const verifyJWTToken = async(req, res, next)=>{
+
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    // await client.connect();
+        const db = client.db('laxius_decor');
+        const userCollections = db.collection('users');
+        const serviceCollections = db.collection('services');
+        const packageCollections = db.collection('packages');
+        const bookingCollections = db.collection('bookings');
+        const paymentCollections = db.collection('payments');
+        const reviewCollections = db.collection('reviews');
+
+        const verifyJWTToken = async(req, res, next)=>{
   const token = req.headers.authorization;
   if(!token){
     return res.status(401).send({message: 'Unauthorized access'})
@@ -59,18 +73,6 @@ const verifyJWTToken = async(req, res, next)=>{
 
   
 }
-
-async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
-        const db = client.db('laxius_decor');
-        const userCollections = db.collection('users');
-        const serviceCollections = db.collection('services');
-        const packageCollections = db.collection('packages');
-        const bookingCollections = db.collection('bookings');
-        const paymentCollections = db.collection('payments');
-        const reviewCollections = db.collection('reviews');
 
         // role middleware
          const verifyAdmin = async(req, res, next)=>{
@@ -1150,6 +1152,11 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
       
       res.send(result);
     })
+     app.get('/reviews', async(req, res)=> {
+      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
+      res.send(reviews);
+
+    })
 
     app.get('/reviews/service/:id', async(req, res)=> {
       const serviceId = req.params.id;
@@ -1157,11 +1164,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
       res.send(reviews);
     })
 
-    app.get('/reviews', async(req, res)=> {
-      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
-      res.send(reviews);
-
-    })
+   
 
     
 
