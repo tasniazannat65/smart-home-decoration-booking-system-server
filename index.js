@@ -155,6 +155,21 @@ async function run() {
       
      }
     })
+    app.get('/users/profile', verifyJWTToken, async(req, res)=> {
+      try {
+        const email = req.decoded_email;
+        const user = await userCollections.findOne({email});
+        if(!user){
+          return res.status(404).send({message: 'User not found'});
+        }
+        res.send(user);
+        
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({message: 'Failed to fetch profile'})
+        
+      }
+    })
 
     app.patch('/users/profile', verifyJWTToken, async(req, res)=> {
       try {
