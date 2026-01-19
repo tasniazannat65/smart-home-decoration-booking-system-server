@@ -1080,14 +1080,14 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
     });
 
     app.post('/reviews', verifyJWTToken, async(req, res)=> {
-      const {rating, message, serviceId} = req.body;
-      if(!rating || !message || !serviceId) {
+      const {rating, message, bookingId} = req.body;
+      if(!rating || !message || !bookingId) {
         return res.status(400).send({message: 'All field required'});
 
       }
       const completedBooking = await bookingCollections.findOne({
         userEmail: req.decoded_email,
-        serviceId: new ObjectId(serviceId),
+        _id: new ObjectId(bookingId),
         paymentStatus: 'paid',
         status: 'completed'
       });
@@ -1096,6 +1096,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
           message: 'You can review only after completing this service'
         })
       }
+      const serviceId = completedBooking.serviceId;
         const alreadyReviewed = await reviewCollections.findOne({
         userId: req.user._id,
         serviceId: new ObjectId(serviceId)
