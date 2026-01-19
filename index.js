@@ -1118,6 +1118,10 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
       }
     
       const result = await reviewCollections.insertOne(review);
+      await bookingCollections.updateOne(
+        {_id: new ObjectId(bookingId)},
+        {$set: {reviewed: true}}
+      )
       const serviceReviews = await reviewCollections.aggregate([
         {$match: {serviceId: new ObjectId(serviceId)}},
         {$group: {_id: null, avgRating: {$avg: '$rating'}}}
