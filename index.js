@@ -326,20 +326,32 @@ async function run() {
       if(category){
         query.service_category = category;
       }
-      if(isAdmin){
       const total = await serviceCollections.countDocuments(query);
-       const services = await serviceCollections.find(query).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
-      return res.send({
+  const services = await serviceCollections.find(query).sort({createdAt: -1}).skip(skip).limit(limit).toArray();
+    
+      if(isAdmin){
+          return res.send({
         services,
         total,
         page,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        admin: true,
+        
       });
+     
 
 
       }
-     const services = await serviceCollections.find(query).sort({createdAt: -1}).toArray();
-     res.send(services);
+
+      res.send({
+        services,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+        
+      })
+   
         
       } catch (error) {
         res.status(500).send({message: 'Server error'});
