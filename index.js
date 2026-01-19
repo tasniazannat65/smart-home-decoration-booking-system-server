@@ -1080,8 +1080,8 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
     });
 
     app.post('/reviews', verifyJWTToken, async(req, res)=> {
-      const {rating, message, serviceId} = req.body;
-      if(!rating || !message || !serviceId) {
+      const {rating, message, serviceId, userEmail, userName} = req.body;
+      if(!rating || !message || !serviceId || !userEmail) {
         return res.status(400).send({message: 'All field required'});
 
       }
@@ -1107,6 +1107,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
 
       const review = {
         userId: req.user._id,
+        userEmail,
         userName: req.user.displayName,
         userPhoto: req.user.photoURL,
         serviceId: new ObjectId(serviceId),
