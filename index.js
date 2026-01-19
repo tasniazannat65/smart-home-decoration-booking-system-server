@@ -156,6 +156,46 @@ async function run() {
      }
     })
 
+    app.patch('/users/profile', verifyJWTToken, async(req, res)=> {
+      try {
+        const email = req.decoded_email;
+        const {displayName, photoURL}= req.body;
+        if(!displayName && !photoURL) {
+          return res.status(400).send({
+            message: 'Nothing to update'
+          })
+        }
+        const updateDoc = {
+          $set: {
+            ...(displayName && {displayName}),
+            ...(photoURL && {photoURL}),
+            updatedAt: new Date(),
+          }
+        }
+        const result = await userCollections.updateOne(
+          {email},
+          updateDoc
+        );
+        if(result.matchedCount === 0){
+          return res.status(404).send({
+            message: 'User not found'
+          })
+        }
+        res.send({
+          success: true,
+          modifiedCount: result.modifiedCount
+        })
+
+        
+      } catch (error) {
+        
+        console.error('Profile update error:', error);
+        res.status(500).send({
+          message: 'Profile update failed'
+        })
+      }
+    })
+
 
 
 
@@ -1171,7 +1211,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
       res.send(result);
     })
      app.get('/reviews', async(req, res)=> {
-      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
+      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(6).toArray();
       res.send(reviews);
 
     })
