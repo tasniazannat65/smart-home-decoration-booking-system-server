@@ -1141,10 +1141,7 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
 
     // reviews related API's
 
-    app.get('/reviews', async(req, res)=> {
-      const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(8).toArray();
-      res.send(reviews);
-    });
+  
 
     app.post('/reviews', verifyJWTToken, async(req, res)=> {
       const {rating, message, bookingId} = req.body;
