@@ -598,6 +598,8 @@ const updateDoc = {
       try {
         const bookingInfo = {
           ...req.body,
+          serviceId: new ObjectId(req.body.serviceId), 
+
           bookingDate: new Date(req.body.bookingDate),
           paymentStatus: 'pending',
           status: 'pending',
@@ -1143,85 +1145,135 @@ app.patch('/decorator/project/:id/status', verifyJWTToken, verifyDecorator, asyn
 
   
 
-    app.post('/reviews', verifyJWTToken, async(req, res)=> {
-      const {rating, message, bookingId} = req.body;
-      if(!rating || !message || !bookingId) {
-        return res.status(400).send({message: 'All field required'});
+  app.post('/reviews', verifyJWTToken, async (req, res) => {
+  try {
+    const { rating, message, bookingId } = req.body;
 
-      }
-      const completedBooking = await bookingCollections.findOne({
-        userEmail: req.decoded_email,
-        _id: new ObjectId(bookingId),
-        paymentStatus: 'paid',
-        status: 'completed'
+    if (!rating || !message || !bookingId) {
+      return res.status(400).send({ message: 'All field required' });
+    }
+
+    if (!ObjectId.isValid(bookingId)) {
+      return res.status(400).send({ message: 'Invalid booking id' });
+    }
+
+    const completedBooking = await bookingCollections.findOne({
+      _id: new ObjectId(bookingId),
+      userEmail: req.decoded_email,
+      paymentStatus: 'paid',
+      status: 'completed'
+    });
+
+    if (!completedBooking) {
+      return res.status(403).send({
+        message: 'You can review only after completing this service'
       });
-      if(!completedBooking){
-        return res.status(403).send({
-          message: 'You can review only after completing this service'
-        })
-      }
-      const serviceId = completedBooking.serviceId;
-        const alreadyReviewed = await reviewCollections.findOne({
-        userId: req.user._id,
-        serviceId: new ObjectId(serviceId)
-      })
-      if(alreadyReviewed){
-        return res.status(409).send({message: 'Already reviewed'});
+    }
 
-      }
+    if (!ObjectId.isValid(completedBooking.serviceId)) {
+      return res
+        .status(400)
+        .send({ message: 'Invalid service id in booking' });
+    }
 
-      const review = {
-        userId: req.user._id,
-        userEmail: req.decoded_email,
-        userName: req.user.displayName,
-        userPhoto: req.user.photoURL,
-        serviceId: new ObjectId(serviceId),
-        rating: Number(rating),
-        message,
-        createdAt: new Date()
-      }
-    
-      const result = await reviewCollections.insertOne(review);
-      await bookingCollections.updateOne(
-        {_id: new ObjectId(bookingId)},
-        {$set: {reviewed: true}}
-      )
-      const serviceReviews = await reviewCollections.aggregate([
-        {$match: {serviceId: new ObjectId(serviceId)}},
-        {$group: {_id: null, avgRating: {$avg: '$rating'}}}
-      ]).toArray();
-      const serviceAvgRating = serviceReviews[0]?.avgRating || 0;
-      const service = await serviceCollections.findOne(
-        {_id: new ObjectId(serviceId)}
-      );
-      await serviceCollections.updateOne(
-        {_id: new ObjectId(serviceId)},
-        {$set: {rating: Number(serviceAvgRating.toFixed(1))}}
-      )
+    const serviceObjectId = new ObjectId(completedBooking.serviceId);
 
-      if(service?.createdByEmail){
-        const decorator = await userCollections.findOne({
-          email: service.createdByEmail,
-          role: 'decorator'
-        })
-        if(decorator){
-          const decoratorServices = await serviceCollections.find({createdByEmail: decorator.email}).project({_id: 1}).toArray();
-          const serviceIds = decoratorServices.map(s => s._id);
-          const decoratorRatingAgg = await reviewCollections.aggregate([
-            {$match: {serviceId: {$in: serviceIds}}},
-            {$group: {_id: null, avgRating: {$avg: '$rating'}}}
-          ]).toArray();
-          const decoratorAvgRating = decoratorRatingAgg[0]?.avgRating || 0;
+    const user = await userCollections.findOne({
+      email: req.decoded_email
+    });
+
+    if (!user) {
+      return res.status(401).send({ message: 'User not found' });
+    }
+
+    const alreadyReviewed = await reviewCollections.findOne({
+      userId: user._id,
+      serviceId: serviceObjectId
+    });
+
+    if (alreadyReviewed) {
+      return res.status(409).send({ message: 'Already reviewed' });
+    }
+
+    const review = {
+      userId: user._id,
+      userEmail: user.email,
+      userName: user.displayName,
+      userPhoto: user.photoURL,
+      serviceId: serviceObjectId,
+      rating: Number(rating),
+      message,
+      createdAt: new Date()
+    };
+
+    const result = await reviewCollections.insertOne(review);
+
+    await bookingCollections.updateOne(
+      { _id: new ObjectId(bookingId) },
+      { $set: { reviewed: true } }
+    );
+
+    const serviceReviews = await reviewCollections
+      .aggregate([
+        { $match: { serviceId: serviceObjectId } },
+        { $group: { _id: null, avgRating: { $avg: '$rating' } } }
+      ])
+      .toArray();
+
+    const serviceAvgRating = serviceReviews.length
+      ? serviceReviews[0].avgRating
+      : 0;
+
+    const service = await serviceCollections.findOne({
+      _id: serviceObjectId
+    });
+
+    await serviceCollections.updateOne(
+      { _id: serviceObjectId },
+      { $set: { rating: Number(serviceAvgRating.toFixed(1)) } }
+    );
+
+    if (service?.createdByEmail) {
+      const decorator = await userCollections.findOne({
+        email: service.createdByEmail,
+        role: 'decorator'
+      });
+
+      if (decorator) {
+        const decoratorServices = await serviceCollections
+          .find({ createdByEmail: decorator.email })
+          .project({ _id: 1 })
+          .toArray();
+
+        const serviceIds = decoratorServices.map(s => s._id);
+
+        if (serviceIds.length) {
+          const decoratorRatingAgg = await reviewCollections
+            .aggregate([
+              { $match: { serviceId: { $in: serviceIds } } },
+              { $group: { _id: null, avgRating: { $avg: '$rating' } } }
+            ])
+            .toArray();
+
+          const decoratorAvgRating = decoratorRatingAgg.length
+            ? decoratorRatingAgg[0].avgRating
+            : 0;
+
           await userCollections.updateOne(
-            {_id: decorator._id},
-            {$set: {rating: Number(decoratorAvgRating.toFixed(1))}}
-          )
-
+            { _id: decorator._id },
+            { $set: { rating: Number(decoratorAvgRating.toFixed(1)) } }
+          );
         }
       }
-      
-      res.send(result);
-    })
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error('Review POST error:', error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
      app.get('/reviews', async(req, res)=> {
       const reviews = await reviewCollections.find().sort({createdAt: -1}).limit(6).toArray();
       res.send(reviews);
